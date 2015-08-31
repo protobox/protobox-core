@@ -153,7 +153,8 @@ if [ "$OS" == 'debian' ] || [ "$OS" == 'ubuntu' ]; then
 
     # Setup config
     #if [ ! -f "/etc/ansible/ansible.cfg" ]; then
-        cp /vagrant/lib/ansible.cfg /etc/ansible/ansible.cfg
+        #cp /vagrant/lib/ansible.cfg /etc/ansible/ansible.cfg
+        cp /vagrant/vendor/protobox/ansible.cfg ~/ansible.cfg
     #fi
 
     echo "Finished installing ansible config"

@@ -1,3 +1,5 @@
+require 'yaml'
+
 class IDEError < Vagrant::Errors::VagrantError
   def initialize(message = "IDE Error")
     #super
@@ -7,9 +9,13 @@ end
 
 class IDE
   def self.configure(config)
-    @root_dir = File.expand_path(File.join(File.dirname(__FILE__), '../'))
+    @root_dir = File.expand_path(File.join(File.dirname(__FILE__), '../../'))
     @protobox_dir = File.join(@root_dir, '.protobox')
-    @protobox_config = File.join(@root_dir, 'config.yml')
+    @protobox_config = File.join(@root_dir, 'protobox.yml')
+
+    # Store the current version of Vagrant for use in conditionals when dealing
+    # with possible backward compatible issues.
+    @vagrant_version = Vagrant::VERSION.sub(/^v/, '')
 
     # Check vagrant version
     if Vagrant::VERSION < "1.5.0"
@@ -18,6 +24,13 @@ class IDE
 
       raise IDEError, msg
     end
+
+    # Check for environment
+    # @TODO - write environment to .protobox for commands to later use
+    #@vagrant_env = ENV["VAGRANT_ENV"] || ARGV[1]
+    #if ARGV[0] == "up" and @vagrant_env.nil?
+    #  raise IDEError, "Missing environment: vagrant up <environment>\n"
+    #end
 
     # Create protobox dir if it doesn't exist
     if !File.directory?(@protobox_dir)
@@ -28,10 +41,6 @@ class IDE
     if !File.file?(@protobox_config)
       raise IDEError, "Config file is missing: #{@protobox_config}\n"
     end
-
-    # Store the current version of Vagrant for use in conditionals when dealing
-    # with possible backward compatible issues.
-    @vagrant_version = Vagrant::VERSION.sub(/^v/, '')
 
     # Open config file location
     settings = YAML.load_file(@protobox_config)
@@ -46,7 +55,7 @@ class IDE
     self.build_galaxyfile(settings)
 
     # Build the dashboard
-    self.build_dashboard(settings)
+    #self.build_dashboard(settings)
 
     # Default Box
     if settings['vagrant'].has_key?("box") and !settings['vagrant']['box'].nil?
@@ -69,9 +78,12 @@ class IDE
     end
 
     # Hostname
+    vmhostname = "protobox"
     if settings['vagrant'].has_key?("hostname") and !settings['vagrant']['hostname'].nil?
-      config.vm.hostname = settings['vagrant']['hostname']
+      vmhostname = settings['vagrant']['hostname']
     end
+
+    config.vm.hostname = vmhostname
 
     # Ports and IP Address
     if settings['vagrant'].has_key?("usable_port_range") and !settings['vagrant']['usable_port_range'].nil?
@@ -85,9 +97,9 @@ class IDE
     # Forwarded ports
     if settings['vagrant'].has_key?("ports") and !settings['vagrant']['ports'].nil?
       settings['vagrant']['ports'].each do |item, port|
-        if !port['guest'].nil? and 
-           !port['host'].nil? and 
-           !port['guest'].empty? and 
+        if !port['guest'].nil? and
+           !port['host'].nil? and
+           !port['guest'].empty? and
            !port['host'].empty?
           config.vm.network :forwarded_port, guest: Integer(port['guest']), host: Integer(port['host']), protocol: port["protocol"] ||= "tcp"
         end
@@ -132,27 +144,27 @@ class IDE
             nfs_udp = !folder['nfs_udp'].nil? ? folder['nfs_udp'] : true
             nfs_version = !folder['nfs_version'].nil? ? folder['nfs_version'] : 3
 
-            config.vm.synced_folder folder['source'], folder['target'], 
-              type: type, 
+            config.vm.synced_folder folder['source'], folder['target'],
+              type: type,
               create: create,
-              disabled: disabled, 
-              nfs_udp: nfs_udp, 
+              disabled: disabled,
+              nfs_udp: nfs_udp,
               nfs_version: nfs_version
-          
+
           # RSYNC
           elsif type == 'rsync'
             rsync_args = !folder['rsync__args'].nil? ? folder['rsync__args'] : ["--verbose", "--archive", "--delete", "-z"]
             rsync_auto = !folder['rsync__auto'].nil? ? folder['rsync__auto'] : true
             rsync_exclude = !folder['rsync__exclude'].nil? ? folder['rsync__exclude'] : [".vagrant/"]
 
-            config.vm.synced_folder folder['source'], folder['target'], 
-              type: type, 
+            config.vm.synced_folder folder['source'], folder['target'],
+              type: type,
               create: create,
-              disabled: disabled, 
-              rsync__args: rsync_args, 
-              rsync__auto: rsync_auto, 
+              disabled: disabled,
+              rsync__args: rsync_args,
+              rsync__auto: rsync_auto,
               rsync__exclude: rsync_exclude
-          
+
           # No type found, use old method
           else
             #puts "Missing Type: " + type
@@ -160,11 +172,11 @@ class IDE
             group = !folder['group'].nil? ? folder['group'] : ''
             mount_options = !folder['mount_options'].nil? ? folder['mount_options'] : Array.new
 
-            config.vm.synced_folder folder['source'], folder['target'], 
+            config.vm.synced_folder folder['source'], folder['target'],
               create: create,
-              disabled: disabled, 
-              owner: owner, 
-              group: group, 
+              disabled: disabled,
+              owner: owner,
+              group: group,
               :mount_options => mount_options
           end
         end
@@ -172,11 +184,9 @@ class IDE
     end
 
     # Provider Configuration
-    
+
     config.vm.provider "virtualbox" do |prov|
-      if settings['vagrant'].has_key?("hostname") and !settings['vagrant']['hostname'].nil?
-        prov.name = settings['vagrant']['hostname']
-      end
+      prov.name = vmhostname
       prov.customize ["modifyvm", :id, "--memory", settings['vagrant']["memory"] ||= "2048"]
       prov.customize ["modifyvm", :id, "--cpus", settings['vagrant']["cpus"] ||= "1"]
       prov.customize ["modifyvm", :id, "--natdnsproxy1", "on"]
@@ -192,7 +202,7 @@ class IDE
           # Loop through provider options
           options.each do |type, values|
             # Check if option has suboptions
-            if values.is_a?(Hash) 
+            if values.is_a?(Hash)
               values.each do |key, value|
                 params.customize [type, :id, "--#{key}", value]
               end
@@ -205,57 +215,104 @@ class IDE
       end
     end
 
-    # Ansible Provisioning
-    ansible_params = Array.new
+    # protobox provisioner
+    if settings['vagrant'].has_key?("provisioner") and settings['vagrant']['provisioner'] == 'ansible'
 
-    if !settings['ansible'].nil? and !settings['ansible']['playbook'].nil? and settings['ansible']['playbook'] != "default"
-      playbook_path = "/vagrant/" + settings['ansible']['playbook']
-    else
-      playbook_path = "/vagrant/.protobox/playbook"
-    end
+      inventory_path = File.join(@protobox_dir, 'ansible_inventory')
 
-    ansible_params << playbook_path
+      #@TODO - extract hosts playbook and assign
+      # inventory_group = "vagrant-web"
 
-    if !settings['ansible'].nil? and !settings['ansible']['inventory'].nil?
-      ansible_params << "-i \"" + ansible['inventory'] + "\""
-    end
+      # ansible_inventory_content = ""
+      # ansible_inventory_content += "# Generated by Vagrant\n\n"
+      # ansible_inventory_content += vmhostname + " ansible_ssh_host=127.0.0.1 ansible_ssh_port=2222\n\n"
+      # ansible_inventory_content += "[" + inventory_group + "]\n" + vmhostname + "\n\n"
 
-    if !settings['ansible'].nil? and !settings['ansible']['verbose'].nil?
-      if settings['ansible']['verbose'] == 'vv' or settings['ansible']['verbose'] == 'vvv' or ansible['verbose'] == 'vvvv'
-        ansible_params << "-" + settings['ansible']['verbose']
+      # # Write the ansible arguments
+      # File.open(inventory_path, "w") do |f|
+      #   f.write(ansible_inventory_content)
+      # end
+
+      ENV['ANSIBLE_ROLES_PATH'] = File.join(@root_dir, 'vendor', 'roles')
+      #ENV['ANSIBLE_CONFIG'] = File.join(@root_dir, 'vendor', 'protobox', 'ansible.cfg')
+
+      if !settings['ansible'].nil? and !settings['ansible']['playbook'].nil? and settings['ansible']['playbook'] != "default"
+        playbook_path = File.join(@root_dir, settings['ansible']['playbook'])
       else
-        ansible_params << "--verbose"
+        playbook_path = File.join(@root_dir, 'playbooks', 'vagrant-web.yml')
       end
-    end
 
-    ansible_params << "--connection=local"
+      config.vm.provision :ansible do |ansible|
+        ansible.playbook = playbook_path
+        #ansible.inventory_path = inventory_path
 
-    if !settings['ansible'].nil? and !settings['ansible']['extra_vars'].nil?
-      extra_vars = ansible['extra_vars']
+        #@TODO - make the groups dynamic
+        ansible.groups = {
+          'vagrant-web' => ['default'],
+        #  'linode-web' => ['default'],
+        #  'digitalocean-dev' => ['default']
+        }
+
+        ansible.verbose = settings['ansible']['verbose'] ||= ""
+        #ansible.limit = "all"
+        #ansible.limit = "linode-web"
+        #ansible.limit = inventory_group
+        ansible.extra_vars = { ansible_ssh_user: 'vagrant' }
+      end
     else
-      extra_vars = Hash.new
+      # Ansible Provisioning
+      ansible_params = Array.new
+
+      if !settings['ansible'].nil? and !settings['ansible']['playbook'].nil? and settings['ansible']['playbook'] != "default"
+        playbook_path = "/vagrant/" + settings['ansible']['playbook']
+      else
+        playbook_path = "/vagrant/.protobox/playbook"
+      end
+
+      ansible_params << playbook_path
+
+      if !settings['ansible'].nil? and !settings['ansible']['inventory'].nil?
+        ansible_params << "-i \"" + ansible['inventory'] + "\""
+      end
+
+      if !settings['ansible'].nil? and !settings['ansible']['verbose'].nil?
+        if settings['ansible']['verbose'] == 'vv' or settings['ansible']['verbose'] == 'vvv' or ansible['verbose'] == 'vvvv'
+          ansible_params << "-" + settings['ansible']['verbose']
+        else
+          ansible_params << "--verbose"
+        end
+      end
+
+      ansible_params << "--connection=local"
+
+      if !settings['ansible'].nil? and !settings['ansible']['extra_vars'].nil?
+        extra_vars = ansible['extra_vars']
+      else
+        extra_vars = Hash.new
+      end
+
+      extra_vars['protobox_env'] = "vagrant"
+      #extra_vars['protobox_config'] = "/vagrant/" + vagrant_file
+
+      ansible_params << "--extra-vars=\"" + extra_vars.map{|k,v| "#{k}=#{v}"}.join(" ").gsub("\"","\\\"") + "\"" unless extra_vars.empty?
+
+      config.vm.provision :shell, :path => "lib/initial-setup.sh", :keep_color => true
+
+      # Write the ansible arguments
+      File.open(File.join(@protobox_dir, 'ansible_args'), "w") do |f|
+        f.write(ansible_params.join(" "))
+      end
+
+      # Finishing provisioner
+      config.vm.provision :shell, :inline => <<-PREPARE
+        /bin/cat /vagrant/lib/logo.txt
+        DASHBOARD=( $( /bin/cat /vagrant/.protobox/dashboard ) )
+        if [[ ! -z "$DASHBOARD" ]]; then
+          echo "Dashboard: $DASHBOARD"
+        fi
+      PREPARE
     end
 
-    extra_vars['protobox_env'] = "vagrant"
-    #extra_vars['protobox_config'] = "/vagrant/" + vagrant_file
-
-    ansible_params << "--extra-vars=\"" + extra_vars.map{|k,v| "#{k}=#{v}"}.join(" ").gsub("\"","\\\"") + "\"" unless extra_vars.empty?
-
-    config.vm.provision :shell, :path => "lib/initial-setup.sh", :keep_color => true
-
-    # Write the ansible arguments
-    File.open(File.join(@protobox_dir, 'ansible_args'), "w") do |f|
-      f.write(ansible_params.join(" "))
-    end
-
-    # Finishing provisioner
-    config.vm.provision :shell, :inline => <<-PREPARE
-      /bin/cat /vagrant/lib/logo.txt
-      DASHBOARD=( $( /bin/cat /vagrant/.protobox/dashboard ) )
-      if [[ ! -z "$DASHBOARD" ]]; then
-        echo "Dashboard: $DASHBOARD"
-      fi
-    PREPARE
 
     # SSH Configuration
     if settings['vagrant'].has_key?("ssh") and !settings['vagrant']['ssh'].nil?
@@ -301,7 +358,7 @@ class IDE
     #play['sudo'] = true
     #play['sudo_user'] = 'root'
     #play['vars_files'] = ['{{ protobox_config }}']
-    
+
     play['roles'] = []
 
     if !yaml['modules'].nil?
@@ -488,7 +545,7 @@ class IDE
     if !yaml['mysql'].nil? and yaml['mysql']['install'] == 1
       yaml['mysql']['databases'].each do |vhost|
         databases.push({
-          :name => vhost['name'], 
+          :name => vhost['name'],
           :type => "mysql"
         })
       end
@@ -497,7 +554,7 @@ class IDE
     if !yaml['mariadb'].nil? and yaml['mariadb']['install'] == 1
       yaml['mariadb']['databases'].each do |vhost|
         databases.push({
-          :name => vhost['name'], 
+          :name => vhost['name'],
           :type => "mariadb"
         })
       end
@@ -506,7 +563,7 @@ class IDE
     if !yaml['postgresql'].nil? and yaml['postgresql']['install'] == 1
       yaml['postgresql']['databases'].each do |vhost|
         databases.push({
-          :name => vhost['name'], 
+          :name => vhost['name'],
           :type => "postgresql"
         })
       end
