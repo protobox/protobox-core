@@ -239,7 +239,7 @@ class IDE
       if !settings['ansible'].nil? and !settings['ansible']['playbook'].nil? and settings['ansible']['playbook'] != "default"
         playbook_path = File.join(@root_dir, settings['ansible']['playbook'])
       else
-        playbook_path = File.join(@root_dir, 'playbooks', 'vagrant-web.yml')
+        playbook_path = File.join(@root_dir, 'playbooks', 'vagrant.yml')
       end
 
       config.vm.provision :ansible do |ansible|
@@ -248,12 +248,19 @@ class IDE
 
         #@TODO - make the groups dynamic
         ansible.groups = {
-          'vagrant-web' => ['default'],
+          'vagrant' => ['default'],
         #  'linode-web' => ['default'],
         #  'digitalocean-dev' => ['default']
         }
 
-        ansible.verbose = settings['ansible']['verbose'] ||= ""
+        if !settings['ansible'].nil?
+          ansible.verbose = settings['ansible']['verbose'] ||= ""
+
+          if !settings['ansible']['tags'].nil?
+            ansible.tags = settings['ansible']['tags']
+          end
+        end
+
         #ansible.limit = "all"
         #ansible.limit = "linode-web"
         #ansible.limit = inventory_group
