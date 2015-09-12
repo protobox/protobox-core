@@ -96,7 +96,7 @@ class IDE
 
     # Forwarded ports
     if settings['vagrant'].has_key?("ports") and !settings['vagrant']['ports'].nil?
-      settings['vagrant']['ports'].each do |item, port|
+      settings['vagrant']['ports'].each do |port, item|
         if !port['guest'].nil? and
            !port['host'].nil? and
            !port['guest'].empty? and
@@ -128,7 +128,7 @@ class IDE
 
     # Synced Folders
     if settings['vagrant'].has_key?("folders") and !settings['vagrant']['folders'].nil?
-      settings['vagrant']['folders'].each do |item, folder|
+      settings['vagrant']['folders'].each do |folder, item|
         if !folder['source'].nil? and !folder['target'].nil?
           type = !folder['type'].nil? ? folder['type'] : 'nfs'
           create = !folder['create'].nil? ? folder['create'] : false
@@ -257,7 +257,11 @@ class IDE
         #ansible.limit = "all"
         #ansible.limit = "linode-web"
         #ansible.limit = inventory_group
-        ansible.extra_vars = { ansible_ssh_user: 'vagrant' }
+        ansible.extra_vars = {
+          ansible_ssh_user: 'vagrant',
+          ansible_connection: 'ssh',
+          ansible_ssh_args: '-o ForwardAgent=yes'
+        }
       end
     else
       # Ansible Provisioning
