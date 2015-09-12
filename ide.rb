@@ -215,8 +215,12 @@ class IDE
       end
     end
 
+    # no provisioner
+    if settings['vagrant'].has_key?("provisioner") and settings['vagrant']['provisioner'] == 'none'
+      # do nothing
+
     # protobox provisioner
-    if settings['vagrant'].has_key?("provisioner") and settings['vagrant']['provisioner'] == 'ansible'
+    elsif settings['vagrant'].has_key?("provisioner") and settings['vagrant']['provisioner'] == 'ansible'
 
       inventory_path = File.join(@protobox_dir, 'ansible_inventory')
 
